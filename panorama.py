@@ -120,8 +120,13 @@ class MultiDiffusion(nn.Module):
         text_embeds = self.get_text_embeds(prompts, negative_prompts)  # [2, 77, 768]
 
         # Define panorama grid and get views
+        # 这一步，我们将我们自定义的噪声传入作为初始的噪声
         latent = torch.randn((1, self.unet.in_channels, height // 8, width // 8), device=self.device)
         views = get_views(height, width)
+
+        # 创建了与全景图像张量 latent 相同形状的计数和值张量。
+        # 计数张量 count 用于累计生成过程中每个像素点的更新次数，
+        # 值张量 value 用于存储生成过程中每个像素点的累计值
         count = torch.zeros_like(latent)
         value = torch.zeros_like(latent)
 
@@ -134,28 +139,41 @@ class MultiDiffusion(nn.Module):
 
                 for h_start, h_end, w_start, w_end in views:
                     # TODO we can support batches, and pass multiple views at once to the unet
+                    # 提取当前窗口的的潜在向量
                     latent_view = latent[:, :, h_start:h_end, w_start:w_end]
 
                     # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
                     latent_model_input = torch.cat([latent_view] * 2)
 
                     # predict the noise residual
+                    # 使用 self.unet 模型对扩展的潜在向量 latent_model_input 进行前向传播，预测噪声残差。
+                    # 其中，t 是当前推理步数，encoder_hidden_states 是文本嵌入表示
                     noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeds)['sample']
 
                     # perform guidance
+                    # 先将噪声残差张量 noise_pred 分成两个部分，分别赋值给 noise_pred_uncond 和 noise_pred_cond。
+                    # 然后，通过将无条件部分 noise_pred_uncond 和有条件部分 noise_pred_cond 进行加权叠加，计算得到最终的噪声残差张量
                     noise_pred_uncond, noise_pred_cond = noise_pred.chunk(2)
+                    # 生成过程中使用条件和无条件的噪声，以提供更多的控制和指导。具体的权重由 guidance_scale 参数控制
                     noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
 
                     # compute the denoising step with the reference model
                     latents_view_denoised = self.scheduler.step(noise_pred, t, latent_view)['prev_sample']
+
+                    # 将去噪后的潜在向量 latents_view_denoised 和计数值 1 累加到值张量 value 和计数张量 count 的对应视图位置上。
+                    # 在每个像素点上都会累计多次去噪的结果和计数
                     value[:, :, h_start:h_end, w_start:w_end] += latents_view_denoised
                     count[:, :, h_start:h_end, w_start:w_end] += 1
 
                 # take the MultiDiffusion step
+                # 对于整个latent，对于计数不为零的像素点，将值张量 value 除以计数张量 count，得到平均值；
+                # 对于计数为零的像素点，保持值张量 value 不变。最终，更新全景图像的潜在向量 latent
                 latent = torch.where(count > 0, value / count, value)
 
         # Img latents -> imgs
+        # 将更新后的全景图像潜在向量 latent 作为输入，进行解码，得到图像张量 
         imgs = self.decode_latents(latent)  # [1, 3, 512, 512]
+        # 对生成的图像进行后处理，将图像转换为 PIL 图像格式，并将其作为函数的返回值
         img = T.ToPILImage()(imgs[0].cpu())
         return img
 
