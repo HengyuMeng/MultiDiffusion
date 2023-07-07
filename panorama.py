@@ -66,13 +66,22 @@ class MultiDiffusion(nn.Module):
 
         print(f'[INFO] loaded stable diffusion!')
 
-    @torch.no_grad()
+    @torch.no_grad() # 将函数内的操作设置为不进行梯度计算
     def get_text_embeds(self, prompt, negative_prompt):
+        """
+        接受正向和负向文本作为输入，并使用 tokenizer 对文本进行分词，
+        然后将分词后的输入张量传递给 text_encoder 模型进行嵌入处理。
+        最后，将正向和负向文本的嵌入结果连接在一起，并返回最终的文本嵌入表示
+        """
         # prompt, negative_prompt: [str]
 
         # Tokenize text and get embeddings
+        
+        # 使用 tokenizer 对正向文本进行分词
         text_input = self.tokenizer(prompt, padding='max_length', max_length=self.tokenizer.model_max_length,
                                     truncation=True, return_tensors='pt')
+        
+        # 将分词后的输入张量传递给 text_encoder 模型，进行嵌入处理，并取得嵌入结果的第一个（0 索引）张量
         text_embeddings = self.text_encoder(text_input.input_ids.to(self.device))[0]
 
         # Do the same for unconditional embeddings
@@ -82,14 +91,19 @@ class MultiDiffusion(nn.Module):
         uncond_embeddings = self.text_encoder(uncond_input.input_ids.to(self.device))[0]
 
         # Cat for final embeddings
+        # 将正向和负向文本的嵌入结果连接起来，形成最终的文本嵌入表示
         text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
         return text_embeddings
 
     @torch.no_grad()
     def decode_latents(self, latents):
         latents = 1 / 0.18215 * latents
+        # 通过给定的潜在向量，模型将生成一个对应的图像样本
         imgs = self.vae.decode(latents).sample
-        imgs = (imgs / 2 + 0.5).clamp(0, 1)
+        
+        # 将图像像素值除以 2 并加上 0.5，将像素值的范围从 [-1, 1] 映射到 [0, 1]。
+        # 然后，使用 .clamp(0, 1) 方法将图像像素值限制在 [0, 1] 的范围内，确保图像的像素值不超出该范围
+        imgs = (imgs / 2 + 0.5).clamp(0, 1) 
         return imgs
 
     @torch.no_grad()
