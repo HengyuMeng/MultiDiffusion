@@ -18,6 +18,9 @@ def seed_everything(seed):
 
 
 def get_views(panorama_height, panorama_width, window_size=64, stride=8):
+    """
+    固定窗口大小为64×64，滑动窗口每次滑动8个单位，计算整个全景图的方框个数以及位置
+    """
     panorama_height /= 8
     panorama_width /= 8
     num_blocks_height = (panorama_height - window_size) // stride + 1
